@@ -1,0 +1,25 @@
+[package]
+name = "vfp-com"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+windows-core = "0.59.0"
+windows-implement = "0.59.0"
+windows-interface = "0.59.0"
+
+[dependencies.windows]
+version = "0.59.0"
+features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Registry", "Win32_System_LibraryLoader"]
+
+# [toolchain]
+# channel = "1.77.2"
+# components = [ "rustfmt", "clippy" ]
+
+# [build]
+# target = "i686-pc-windows-msvc"
