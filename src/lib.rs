@@ -3,15 +3,11 @@ use windows::{
     core::*,
     Win32::{
         Foundation::*,
-        System::{
-            Com::*,
-            LibraryLoader::*,
-            Registry::*
-        }
+        System::Com::*,
     },
 };
 use std::sync::Mutex;
-mod util;
+mod export;
 
 // Define GUID for interface and class
 pub const IID_ICalculator: GUID = GUID::from_u128(0xac39fd20_f263_49f7_9374_04c4a384c8aa);
@@ -19,6 +15,7 @@ pub const CLSID_Calculator: GUID = GUID::from_u128(0x8e7e4b8a_e909_4a03_acdc_4fb
 pub const ProgID: &str = "Calculator.Basic";
 
 // Define the initialization settings structure
+#[repr(C)]
 #[derive(Debug, Clone)]
 struct CalculatorSettings {
     precision: i32,
@@ -28,17 +25,19 @@ struct CalculatorSettings {
 // Define interface for COM object
 #[interface("AC39FD20-F263-49F7-9374-04C4A384C8AA")]
 pub unsafe trait ICalculator: IUnknown {
-    fn Add(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
-    fn Subtract(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
-    fn Multiply(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
-    fn Divide(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
-    fn SetPrecision(&self, precision: i32) -> core::result::Result<(), Error>;
-    fn GetPrecision(&self) -> core::result::Result<i32, Error>;
-    fn SetMode(&self, mode: &str) -> core::result::Result<(), Error>;
-    fn GetMode(&self) -> core::result::Result<BSTR, Error>;
+    unsafe fn Add(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
+    unsafe fn Add2(&self, a: f32, b: f32, res: *mut f32) -> HRESULT;
+    unsafe fn Subtract(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
+    unsafe fn Multiply(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
+    unsafe fn Divide(&self, a: f32, b: f32) -> core::result::Result<f32, Error>;
+    unsafe fn SetPrecision(&self, precision: i32) -> core::result::Result<(), Error>;
+    unsafe fn GetPrecision(&self) -> core::result::Result<i32, Error>;
+    unsafe fn SetMode(&self, mode: &str) -> core::result::Result<(), Error>;
+    unsafe fn GetMode(&self) -> core::result::Result<BSTR, Error>;
 }
 
 // Define COM object
+#[repr(C)]
 #[implement(ICalculator)]
 pub struct Calculator {
     settings: Mutex<CalculatorSettings>,
@@ -71,10 +70,22 @@ impl Calculator {
     }
 }
 
+// impl Calculator_Impl {
+//     unsafe fn Initialize(&self, precision: i32, mode: HSTRING) -> windows::core::Result<Self> {
+//         self.this.
+//         this::new(precision, mode)
+//     }
+// }
+
 impl ICalculator_Impl for Calculator_Impl {
     unsafe fn Add(&self, a: f32, b: f32) -> windows::core::Result<f32> {
         let result = a + b;
         Ok(self.round_value(result))
+    }
+
+    unsafe fn Add2(&self, a: f32, b: f32, res: *mut f32) -> HRESULT {
+        *res = a + b;
+        S_OK
     }
 
     unsafe fn Subtract(&self, a: f32, b: f32) -> windows::core::Result<f32> {
@@ -124,305 +135,43 @@ impl ICalculator_Impl for Calculator_Impl {
     }
 }
 
-// ClassFactory for Calculator
-#[implement(IClassFactory)]
-pub struct CalculatorFactory;
-
-impl CalculatorFactory {
-    fn new() -> Self {
-        Self
-    }
-}
-
-impl IClassFactory_Impl for CalculatorFactory_Impl {
-    fn CreateInstance(
-        &self,
-        outer: windows_core::Ref<'_, IUnknown>,
-        iid: *const GUID,
-        ppv: *mut *mut core::ffi::c_void,
-    ) -> windows::core::Result<()> {
-        if outer.is_some() {
-            return Err(CLASS_E_NOAGGREGATION.into());
-        }
-
-        if iid.is_null() {
-            return Err(E_POINTER.into());
-        }
-
-        if ppv.is_null() {
-            return Err(E_POINTER.into());
-        }
-
-        // Create calculator with default settings
-        // These will be overridden by Initialize call
-        let calculator: Calculator = Calculator::new(2, "standard")?;
-        let unknown: windows::core::IUnknown = calculator.into();
-
-        unsafe {
-            let res = unknown.query(iid, ppv);
-            if res.is_err() {
-                return Err(res.into());
-            }
-        }
-        Ok(())
-    }
-
-    fn LockServer(&self, _lock: BOOL) -> windows::core::Result<()> {
-        Ok(())
-    }
-}
-
-
-#[no_mangle]
-pub extern "system" fn DllGetClassObject(
-    clsid: *const GUID,
-    iid: *const GUID,
-    ppv: *mut *mut core::ffi::c_void,
-) -> HRESULT {
-    if clsid.is_null() {
-        return E_POINTER;
-    }
-
-    if iid.is_null() {
-        return E_POINTER;
-    }
-
-    if ppv.is_null() {
-        return E_POINTER;
-    }
-
-    let factory: CalculatorFactory = CalculatorFactory::new();
-    let unknown: windows::core::IUnknown = factory.into(); // tady by melo byt spis into ICalculator?
-    unsafe {
-        if *clsid != CLSID_Calculator {
-            return CLASS_E_CLASSNOTAVAILABLE;
-        }
-        unknown.query(iid, ppv)
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn DllRegisterServer() -> HRESULT {
-    fn register_com_object() -> windows::core::Result<()> {
-        unsafe {
-            // 1. Register ProgID
-            let mut prog_key = HKEY::default();
-            let win32_error = RegCreateKeyA(
-                HKEY_CLASSES_ROOT,
-                PCSTR(ProgID.as_bytes().as_ptr()),
-                &mut prog_key,
-            );
-            if win32_error.is_err() {
-                return Err(win32_error.into());
-            }
-
-            // Set default value for ProgID
-            let win32_error = RegSetValueExA(
-                prog_key,
-                None,
-                None,
-                REG_SZ,
-                Some("Rust Calculator COM Object".as_bytes()),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(prog_key).0;
-                return Err(win32_error.into());
-            }
-
-            // Add CLSID key under ProgID
-            let mut clsid_prog_key = HKEY::default();
-            let win32_error = RegCreateKeyA(
-                prog_key,
-                PCSTR("CLSID".as_bytes().as_ptr()),
-                &mut clsid_prog_key
-            );
-            if win32_error.is_err() {
-                RegCloseKey(prog_key).0;
-                return Err(win32_error.into());
-            }
-
-            let clsid_string = format!("{{{:?}}}", CLSID_Calculator);
-            let win32_error = RegSetValueExA(
-                clsid_prog_key,
-                None,
-                None,
-                REG_SZ,
-                Some(clsid_string.as_bytes()),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(clsid_prog_key).0;
-                RegCloseKey(prog_key).0;
-                return Err(win32_error.into());
-            }
-
-            RegCloseKey(clsid_prog_key).0;
-            RegCloseKey(prog_key).0;
-
-            // 2. Register CLSID
-            let clsid_key_path = format!("CLSID\\{}", clsid_string);
-            let mut clsid_key = HKEY::default();
-            let win32_error = RegCreateKeyA(
-                HKEY_CLASSES_ROOT,
-                PCSTR(clsid_key_path.as_bytes().as_ptr()),
-                &mut clsid_key,
-            );
-            if win32_error.is_err() {
-                return Err(win32_error.into());
-            }
-
-            // Set default value
-            let win32_error = RegSetValueExA(
-                clsid_key,
-                None,
-                None,
-                REG_SZ,
-                Some("Rust Calculator COM Object".as_bytes()),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            // Add ProgID under CLSID
-            let mut prog_id_key = HKEY::default();
-            let win32_error = RegCreateKeyA(
-                clsid_key,
-                PCSTR("ProgID".as_bytes().as_ptr()),
-                &mut prog_id_key
-            );
-            if win32_error.is_err() {
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            let win32_error = RegSetValueExA(
-                prog_id_key,
-                None,
-                None,
-                REG_SZ,
-                Some(ProgID.as_bytes()),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(prog_id_key).0;
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            // Set InprocServer32
-            let mut inproc_key = HKEY::default();
-            let win32_error = RegCreateKeyA(
-                clsid_key,
-                PCSTR("InprocServer32".as_bytes().as_ptr()),
-                &mut inproc_key
-            );
-            if win32_error.is_err() {
-                RegCloseKey(prog_id_key).0;
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            let path = util::get_this_module_path()?;
-            let win32_error = RegSetValueExA(
-                inproc_key,
-                None,
-                None,
-                REG_SZ,
-                Some(path.align_to::<u8>().1),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(inproc_key).0;
-                RegCloseKey(prog_id_key).0;
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            let win32_error = RegSetValueExA(
-                inproc_key,
-                PCSTR("ThreadingModel".as_bytes().as_ptr()),
-                None,
-                REG_SZ,
-                Some("Both".as_bytes()),
-            );
-            if win32_error.is_err() {
-                RegCloseKey(inproc_key).0;
-                RegCloseKey(prog_id_key).0;
-                RegCloseKey(clsid_key).0;
-                return Err(win32_error.into());
-            }
-
-            RegCloseKey(inproc_key).0;
-            RegCloseKey(prog_id_key).0;
-            RegCloseKey(clsid_key).0;
-
-            Ok(())
-        }
-    }
-
-    match register_com_object() {
-        Ok(_) => S_OK,
-        Err(_) => E_FAIL,
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn DllUnregisterServer() -> HRESULT {
-    fn unregister_com_object() -> windows::core::Result<()> {
-        unsafe {
-            // 1. Remove ProgID
-            let win32_error = RegDeleteKeyA(
-                HKEY_CLASSES_ROOT,
-                PCSTR(ProgID.as_bytes().as_ptr()),
-            );
-            if win32_error.is_err() {
-                return Err(win32_error.into());
-            }
-
-            // 2. Remove CLSID
-            let clsid_key = format!("CLSID\\{{{:?}}}", CLSID_Calculator);
-            let win32_error = RegDeleteKeyA(
-                HKEY_CLASSES_ROOT,
-                PCSTR(clsid_key.as_bytes().as_ptr()),
-            );
-            if win32_error.is_err() {
-                return Err(win32_error.into());
-            }
-
-            Ok(())
-        }
-    }
-    match unregister_com_object() {
-        Ok(_) => S_OK,
-        Err(_) => E_FAIL,
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-    // Add proper reference counting if needed
-    S_FALSE
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test() {
-        // Inicializujeme COM knihovnu
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).unwrap() };
+        // Initialize COM dll
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).unwrap() };
+        // match unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) } {
+        //     S_OK => (),
+        //     S_FALSE => (),
+        //     _ => (),
+        // }
 
-        // Zavoláme CoCreateInstance pro získání COM objektu
-        let com_object: windows::core::IUnknown = unsafe { CoCreateInstance(&CLSID_Calculator, None, CLSCTX_ALL).unwrap() };
+        // Get COM object
+        let com_object: windows::core::IUnknown = unsafe { CoCreateInstance(&CLSID_Calculator, None, CLSCTX_INPROC_SERVER).unwrap() };
 
-        // Můžeme použít `cast` pro získání rozhraní (např. IUnknown nebo jiného rozhraní)
+        // Casting
         let calc: ICalculator = com_object.cast::<ICalculator>().unwrap();
 
-        // Práce s COM objektem, volání metod, apod.
-        println!("COM object obtained: {:?}", calc);
-        println!("COM object precision: {:?}", unsafe { calc.GetPrecision() });
+        // Try
+        assert_eq!(unsafe { calc.GetPrecision().unwrap() }, 2);
+        assert_eq!(unsafe { calc.Add(3.14, 6.86).unwrap() }, 10.0);
 
-        // Uvolníme COM knihovnu
+        let mut result: f32 = 0.0;
+        unsafe { calc.Add2(3.14, 6.86, &mut result as *mut f32).unwrap() };
+        assert_eq!(result, 10.0);
+        assert_eq!(unsafe { calc.GetMode().unwrap() }, "standard");
+        unsafe { calc.SetMode("scientific").unwrap() }
+        assert_eq!(unsafe { calc.GetMode().unwrap() }, "scientific");
+
+        // Release COM dll
         unsafe { CoUninitialize() };
+        //println!("CoUninitialize");
+
+        std::mem::forget(com_object);
+        std::mem::forget(calc);
 
     }
 }

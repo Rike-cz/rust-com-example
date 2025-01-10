@@ -10,7 +10,7 @@ use windows::{
 };
 
 #[inline(never)]
-pub unsafe fn get_this_module_handle() -> windows::core::Result<HMODULE> {
+pub(crate) unsafe fn get_this_module_handle() -> windows::core::Result<HMODULE> {
     let mut module = HMODULE::default();
 
     unsafe {
@@ -24,7 +24,7 @@ pub unsafe fn get_this_module_handle() -> windows::core::Result<HMODULE> {
     Ok(module)
 }
 
-pub fn get_module_path(module: HMODULE) -> windows::core::Result<Vec<u16>> {
+pub(crate) fn get_module_path(module: HMODULE) -> windows::core::Result<Vec<u16>> {
     let mut path = vec![0; 1024];
 
     loop {
@@ -41,6 +41,6 @@ pub fn get_module_path(module: HMODULE) -> windows::core::Result<Vec<u16>> {
     }
 }
 
-pub unsafe fn get_this_module_path() -> windows::core::Result<Vec<u16>> {
+pub(crate) unsafe fn get_this_module_path() -> windows::core::Result<Vec<u16>> {
     get_module_path(unsafe { get_this_module_handle()? })
 }
